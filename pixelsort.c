@@ -87,18 +87,31 @@ static void run(const gchar *name,
   gimp_drawable_detach(drawable);
 }
 
-static void sort(guchar *pixels, gint len, gint channels) {
-  // for (gint i = 0; i < (len * channels); i += channels) {
+static void sortRGBA(guchar *pixels, gint len) {
+  // for (gint i = 0; i < (len * 4); i += 4) {
   //   pixels[i] = pixels[i + 2];
   //   pixels[i + 1] = pixels[i + 2];
   // }
-  for (gint i = 0; i < (len * channels); i += channels) {
+  for (gint i = 0; i < (len * 4); i += 4) {
     int j = i;
-    while (j > 0 && pixels[j - channels] > pixels[j]) {
-      guchar tmp = pixels[j];
-      pixels[j] = pixels[j - channels];
-      pixels[j - channels] = tmp;
-      j -= channels;
+    while (j > 0) {
+      gint pixel1[4] = {pixels[j], pixels[j + 1], pixels[j + 2], pixels[j + 3]};
+      gdouble lum1 = 0.2126 * pixel1[0] + 0.7152 * pixel1[1] + 0.0722 * pixel1[2];
+      gint pixel2[4] = {pixels[j - 4], pixels[j - 3], pixels[j - 2], pixels[j - 1]};
+      gdouble lum2 = 0.2126 * pixel2[0] + 0.7152 * pixel2[1] + 0.0722 * pixel2[2];
+
+      if (lum2 > lum1) {
+        break;
+      }
+        pixels[j - 4] = pixel1[0];
+        pixels[j - 3] = pixel1[1];
+        pixels[j - 2] = pixel1[2];
+        pixels[j - 1] = pixel1[3];
+        pixels[j] = pixel2[0];
+        pixels[j + 1] = pixel2[1];
+        pixels[j + 2] = pixel2[2];
+        pixels[j + 3] = pixel2[3];
+      j -= 4;
     }
   }
 }
@@ -130,7 +143,7 @@ static void pixelsort(GimpDrawable *drawable) {
   row = g_new(guchar, channels * (x2 - x1));
   for (gint i = y1; i < y2; i++) {
     gimp_pixel_rgn_get_row(&rgn_in, row, x1, MAX(y1, i), x2 - x1);
-    sort(row, x2 - x1, channels);
+    sortRGBA(row, x2 - x1);
     gimp_pixel_rgn_set_row(&rgn_out, row, x1, i, x2 - x1);
     if (i % 10 == 0) {
       gimp_progress_update((gdouble) (i - y1) / (gdouble) (y2 - y1));
