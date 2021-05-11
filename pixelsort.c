@@ -38,6 +38,10 @@ property_enum (direction, "Sort direction",
 property_boolean (order, "Reverse", FALSE)
      description ("Reverse sort order")
 
+property_double (threshold, "Threshold", 0.0)
+    description ("Determines how much of each row/column is sorted")
+    value_range (0.0, 1.0)
+
 property_seed (seed, "Random seed", rand)
 
 #else
@@ -58,7 +62,6 @@ prepare (GeglOperation *operation)
   gegl_operation_set_format (operation, "output", format);
 }
 
-
 static gboolean
 process (GeglOperation       *operation,
          GeglBuffer          *input,
@@ -69,7 +72,6 @@ process (GeglOperation       *operation,
   GeglProperties    *o = GEGL_PROPERTIES (operation);
   gint           size, i, pos;
   GeglRectangle  dst_rect;
-
 
   if (o->direction == GEGL_ORIENTATION_HORIZONTAL)
     {
@@ -92,23 +94,17 @@ process (GeglOperation       *operation,
   for (i = 0; i < size; i++)
     {
       GeglRectangle src_rect;
-      // gint shift = gegl_random_int_range (o->rand, i + pos, 0, 0, 0,
-      //                                     -o->shift, o->shift + 1);
-      gint shift = 0;
 
       if (o->direction == GEGL_ORIENTATION_HORIZONTAL)
         {
           dst_rect.y = i + result->y;
           src_rect = dst_rect;
-          src_rect.x = result->x + shift;
         }
       else
         {
           dst_rect.x = i + result->x;
           src_rect = dst_rect;
-          src_rect.y = result->y + shift;
         }
-
 
       gegl_buffer_copy (input, &src_rect, GEGL_ABYSS_CLAMP,
                         output, &dst_rect);
