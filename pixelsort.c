@@ -1,158 +1,141 @@
-#include <libgimp/gimp.h>
-#include <stdlib.h>
+/* pixelsort -- a GEGL operation that implements a pixel sorting effect
+ * Copyright (C) 2021 Evergreen
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 
-static void query(void);
-static void run(const gchar *name,
-                gint nparams,
-                const GimpParam *param,
-                gint *nreturn_vals,
-                GimpParam **return_vals);
-static void pixelsort(GimpDrawable *drawable);
+#define GETTEXT_PACKAGE "pixelsort"
+#include <glib/gi18n-lib.h>
 
-GimpPlugInInfo PLUG_IN_INFO = {
-  NULL,
-  NULL,
-  query,
-  run
-};
+#ifdef GEGL_PROPERTIES
 
-MAIN()
+enum_start (gegl_pixelsort_mode)
+  enum_value (GEGL_PIXELSORT_MODE_WHITE, "white", "White")
+  enum_value (GEGL_PIXELSORT_MODE_BLACK, "black", "Black")
+  enum_value (GEGL_PIXELSORT_MODE_LUM, "luminance", "Luminance")
+enum_end (GeglPixelsortMode)
 
-static void query(void) {
-  static GimpParamDef args[] = {
+property_enum (mode, "Mode",
+               GeglPixelsortMode, gegl_pixelsort_mode,
+               GEGL_PIXELSORT_MODE_WHITE)
+  description ("Property used to sort the pixels")
+
+property_enum (direction, "Sort direction",
+               GeglOrientation, gegl_orientation,
+               GEGL_ORIENTATION_HORIZONTAL)
+
+property_boolean (order, "Reverse", FALSE)
+     description ("Reverse sort order")
+
+property_seed (seed, "Random seed", rand)
+
+#else
+
+#define GEGL_OP_AREA_FILTER
+#define GEGL_OP_NAME     pixelsort
+#define GEGL_OP_C_SOURCE pixelsort.c
+
+#include "gegl-op.h"
+
+static void
+prepare (GeglOperation *operation)
+{
+  const Babl              *format;
+  format = gegl_operation_get_source_format (operation, "input");
+
+  gegl_operation_set_format (operation, "input",  format);
+  gegl_operation_set_format (operation, "output", format);
+}
+
+
+static gboolean
+process (GeglOperation       *operation,
+         GeglBuffer          *input,
+         GeglBuffer          *output,
+         const GeglRectangle *result,
+         gint                 level)
+  {
+  GeglProperties    *o = GEGL_PROPERTIES (operation);
+  gint           size, i, pos;
+  GeglRectangle  dst_rect;
+
+
+  if (o->direction == GEGL_ORIENTATION_HORIZONTAL)
     {
-      GIMP_PDB_INT32,
-      "run-mode",
-      "Run mode"
-    },
+      size = result->height;
+      dst_rect.width  = result->width;
+      dst_rect.height = 1;
+      pos = result->y;
+    }
+  else
     {
-      GIMP_PDB_IMAGE,
-      "image",
-      "Input image"
-    },
+      size = result->width;
+      dst_rect.width  = 1;
+      dst_rect.height = result->height;
+      pos = result->x;
+    }
+
+  dst_rect.x = result->x;
+  dst_rect.y = result->y;
+
+  for (i = 0; i < size; i++)
     {
-      GIMP_PDB_DRAWABLE,
-      "drawable",
-      "Input drawable"
+      GeglRectangle src_rect;
+      // gint shift = gegl_random_int_range (o->rand, i + pos, 0, 0, 0,
+      //                                     -o->shift, o->shift + 1);
+      gint shift = 0;
+
+      if (o->direction == GEGL_ORIENTATION_HORIZONTAL)
+        {
+          dst_rect.y = i + result->y;
+          src_rect = dst_rect;
+          src_rect.x = result->x + shift;
+        }
+      else
+        {
+          dst_rect.x = i + result->x;
+          src_rect = dst_rect;
+          src_rect.y = result->y + shift;
+        }
+
+
+      gegl_buffer_copy (input, &src_rect, GEGL_ABYSS_CLAMP,
+                        output, &dst_rect);
     }
-  };
 
-  gimp_install_procedure(
-    "pixelsort",
-    "Sorts pixels",
-    "Sorts pixels in a glitchy looking way.",
-    "Evergreen",
-    "Copyright Evergreen",
-    "2021",
-    "Pixel Sort",
-    "RGB*, GRAY*",
-    GIMP_PLUGIN,
-    G_N_ELEMENTS(args),
-    0,
-    args, NULL
-  );
-
-  gimp_plugin_menu_register("pixelsort", "<Image>/Filters/Misc");
+  return TRUE;
 }
 
-static void run(const gchar *name,
-                gint nparams,
-                const GimpParam *param,
-                gint *nreturn_vals,
-                GimpParam **return_vals) {
-  static GimpParam values[1];
-  GimpPDBStatusType status = GIMP_PDB_SUCCESS;
-  GimpRunMode run_mode;
-  GimpDrawable *drawable;
+static void
+gegl_op_class_init (GeglOpClass *klass)
+{
+  GeglOperationClass       *operation_class;
+  GeglOperationFilterClass *filter_class;
 
-  /* Setting mandatory output values */
-  *nreturn_vals = 1;
-  *return_vals = values;
+  operation_class = GEGL_OPERATION_CLASS (klass);
+  filter_class    = GEGL_OPERATION_FILTER_CLASS (klass);
 
-  values[0].type = GIMP_PDB_STATUS;
-  values[0].data.d_status = status;
+  filter_class->process    = process;
+  operation_class->prepare = prepare;
 
-  /* Getting run_mode - we won't display a dialog if 
-   * we are in NONINTERACTIVE mode */
-  run_mode = param[0].data.d_int32;
-
-  /* Get the specified drawable */
-  drawable = gimp_drawable_get(param[2].data.d_drawable);
-
-  gimp_progress_init("Pixel Sort...");
-  
-  pixelsort(drawable);
-
-  gimp_displays_flush();
-  gimp_drawable_detach(drawable);
+  gegl_operation_class_set_keys (operation_class,
+    "name",        "gegl:pixelsort",
+    "title",       "Pixel Sort",
+    "categories",  "distort",
+    "license",     "GPL3+",
+    "description", "Sorts pixels by different properties within a threshold",
+    NULL);
 }
 
-static void sortRGBA(guchar *pixels, gint len) {
-  // for (gint i = 0; i < (len * 4); i += 4) {
-  //   pixels[i] = pixels[i + 2];
-  //   pixels[i + 1] = pixels[i + 2];
-  // }
-  for (gint i = 0; i < (len * 4); i += 4) {
-    int j = i;
-    while (j > 0) {
-      gint pixel1[4] = {pixels[j], pixels[j + 1], pixels[j + 2], pixels[j + 3]};
-      gdouble lum1 = 0.2126 * pixel1[0] + 0.7152 * pixel1[1] + 0.0722 * pixel1[2];
-      gint pixel2[4] = {pixels[j - 4], pixels[j - 3], pixels[j - 2], pixels[j - 1]};
-      gdouble lum2 = 0.2126 * pixel2[0] + 0.7152 * pixel2[1] + 0.0722 * pixel2[2];
-
-      if (lum2 > lum1) {
-        break;
-      }
-        pixels[j - 4] = pixel1[0];
-        pixels[j - 3] = pixel1[1];
-        pixels[j - 2] = pixel1[2];
-        pixels[j - 1] = pixel1[3];
-        pixels[j] = pixel2[0];
-        pixels[j + 1] = pixel2[1];
-        pixels[j + 2] = pixel2[2];
-        pixels[j + 3] = pixel2[3];
-      j -= 4;
-    }
-  }
-}
-
-static void pixelsort(GimpDrawable *drawable) {
-  gint channels;
-  gint x1, y1, x2, y2;
-  GimpPixelRgn rgn_in, rgn_out;
-  guchar *row;
-
-  gimp_drawable_mask_bounds(drawable->drawable_id, &x1, &y1, &x2, &y2);
-  channels = gimp_drawable_bpp(drawable->drawable_id);
-
-  gimp_pixel_rgn_init(
-    &rgn_in,
-    drawable,
-    x1, y1,
-    x2 - x1, y2 - y1, 
-    FALSE, FALSE
-  );
-  gimp_pixel_rgn_init(
-    &rgn_out,
-    drawable,
-    x1, y1,
-    x2 - x1, y2 - y1, 
-    TRUE, TRUE
-  );
-
-  row = g_new(guchar, channels * (x2 - x1));
-  for (gint i = y1; i < y2; i++) {
-    gimp_pixel_rgn_get_row(&rgn_in, row, x1, MAX(y1, i), x2 - x1);
-    sortRGBA(row, x2 - x1);
-    gimp_pixel_rgn_set_row(&rgn_out, row, x1, i, x2 - x1);
-    if (i % 10 == 0) {
-      gimp_progress_update((gdouble) (i - y1) / (gdouble) (y2 - y1));
-    }
-  }
-
-  g_free(row);
-
-  gimp_drawable_flush(drawable);
-  gimp_drawable_merge_shadow(drawable->drawable_id, TRUE);
-  gimp_drawable_update(drawable->drawable_id, x1, y1, x2 - x1, y2 - y1);
-}
+#endif

@@ -1,8 +1,20 @@
-GIMP Glitch Filters
-===================
+pixelsort
+=========
 
-A collection of GIMP plugins intended to be used in glitch art.  Right now
-it only consists of pixelsort which is a port of this processing script:
+A custom GEGL operation (and by extension GIMP filter) that implements a pixel
+sorting effect.  To use it click "Tools->GEGL Operation" and choose "Pixel Sort"
+in the dropdown.
+
+This is primarily a port of the following processing script to a GEGL operation:
 https://github.com/kimasendorf/ASDFPixelSort
 
-Build and install by running `gimptool-2.0 --install pixelsort.c`.
+## Compiling and Installing
+
+To compile and install you will need the GEGL header files (`libgegl-dev` on
+Debian based distributions or `gegl` on Arch Linux).
+
+```bash
+meson setup build
+meson compile -C build
+cp build/pixelsort.so ~/.local/share/gegl-0.4/plugins
+```
