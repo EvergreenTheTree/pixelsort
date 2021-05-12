@@ -17,6 +17,7 @@
 
 #define GETTEXT_PACKAGE "pixelsort"
 #include <glib/gi18n-lib.h>
+#include <stdio.h>
 
 #ifdef GEGL_PROPERTIES
 
@@ -35,10 +36,10 @@ property_enum (direction, "Sort direction",
                GeglOrientation, gegl_orientation,
                GEGL_ORIENTATION_HORIZONTAL)
 
-property_boolean (order, "Reverse", FALSE)
+property_boolean (reverse, "Reverse", FALSE)
      description ("Reverse sort order")
 
-property_double (threshold, "Threshold", 0.0)
+property_double (threshold, "Threshold", 0.1)
     description ("Determines how much of each row/column is sorted")
     value_range (0.0, 1.0)
 
@@ -52,14 +53,34 @@ property_seed (seed, "Random seed", rand)
 
 #include "gegl-op.h"
 
+static gdouble
+get_key (gfloat *pixel, GeglPixelsortMode mode)
+{
+  gfloat max;
+  switch (mode)
+    {
+    case GEGL_PIXELSORT_MODE_LUM:
+      return 0.2126 * pixel[0] + 0.7152 * pixel[1] + 0.0722 * pixel[2];
+    case GEGL_PIXELSORT_MODE_WHITE:
+    case GEGL_PIXELSORT_MODE_BLACK:
+      max = pixel[0];
+      if (pixel[1] > max)
+        max = pixel[1];
+      if (pixel[2] > max)
+        max = pixel[2];
+      return max;
+    default:
+      return 0.0;
+    }
+}
+
 static void
 prepare (GeglOperation *operation)
 {
-  const Babl              *format;
-  format = gegl_operation_get_source_format (operation, "input");
+  const Babl *space = gegl_operation_get_source_space (operation, "input");
 
-  gegl_operation_set_format (operation, "input",  format);
-  gegl_operation_set_format (operation, "output", format);
+  gegl_operation_set_format (operation, "input", babl_format_with_space ("RGBA float", space));
+  gegl_operation_set_format (operation, "output", babl_format_with_space ("RGBA float", space));
 }
 
 static gboolean
@@ -69,24 +90,32 @@ process (GeglOperation       *operation,
          const GeglRectangle *result,
          gint                 level)
   {
-  GeglProperties    *o = GEGL_PROPERTIES (operation);
-  gint           size, i, pos;
-  GeglRectangle  dst_rect;
+  GeglProperties   *o = GEGL_PROPERTIES (operation);
+  const Babl       *format = gegl_operation_get_format (operation, "output");
+  GeglPixelsortMode mode = o->mode;
+  gint              size, length, i, pos;
+  GeglRectangle     dst_rect;
+  gfloat           *src_buf;
 
   if (o->direction == GEGL_ORIENTATION_HORIZONTAL)
     {
       size = result->height;
-      dst_rect.width  = result->width;
+      length = result->width;
+      dst_rect.width  = length;
       dst_rect.height = 1;
       pos = result->y;
     }
   else
     {
       size = result->width;
+      length = result->height;
       dst_rect.width  = 1;
-      dst_rect.height = result->height;
+      dst_rect.height = length;
       pos = result->x;
     }
+
+  printf("length: %d\n", length);
+  src_buf = g_new0 (gfloat, length * 4);
 
   dst_rect.x = result->x;
   dst_rect.y = result->y;
@@ -106,9 +135,60 @@ process (GeglOperation       *operation,
           src_rect = dst_rect;
         }
 
-      gegl_buffer_copy (input, &src_rect, GEGL_ABYSS_CLAMP,
-                        output, &dst_rect);
+      gegl_buffer_get (input, &src_rect, 1.0, format, src_buf,
+                       GEGL_AUTO_ROWSTRIDE, GEGL_ABYSS_CLAMP);
+
+      gint start = 0;
+      gint end = length;
+      gboolean in_thresh = FALSE;
+      gint j;
+      for (j = 0; j < length * 4; j += 4)
+        {
+          gdouble key = get_key (&src_buf[j], mode);
+          if (key >= o->threshold && !in_thresh)
+            {
+              start = j;
+              in_thresh = TRUE;
+            }
+          else if (key < o->threshold && in_thresh)
+            {
+              end = j;
+              break;
+            }
+        }
+      for (j = 0; j < length * 4; j += 4)
+        {
+          int k = j;
+          while (k > 0)
+            {
+              gdouble key1 = get_key(&src_buf[k], mode);
+              gdouble key2 = get_key(&src_buf[k - 4], mode);
+
+              gboolean in_place = o->reverse ? (key2 > key1) : (key1 > key2);
+              if (in_place)
+                {
+                  break;
+                }
+              gfloat r = src_buf[k];
+              gfloat g = src_buf[k + 1];
+              gfloat b = src_buf[k + 2];
+              gfloat a = src_buf[k + 3];
+              src_buf[k] = src_buf[k - 4];
+              src_buf[k + 1] = src_buf[k - 3];
+              src_buf[k + 2] = src_buf[k - 2];
+              src_buf[k + 3] = src_buf[k - 1];
+              src_buf[k - 4] = r;
+              src_buf[k - 3] = g;
+              src_buf[k - 2] = b;
+              src_buf[k - 1] = a;
+              k -= 4;
+            }
+        }
+      gegl_buffer_set (output, &dst_rect, 0, format, src_buf,
+                       GEGL_AUTO_ROWSTRIDE);
     }
+
+  g_free(src_buf);
 
   return TRUE;
 }
