@@ -18,3 +18,21 @@ meson setup build
 meson compile -C build
 cp build/pixelsort.so ~/.local/share/gegl-0.4/plugins
 ```
+
+## Example Images
+
+Original image:
+
+![Original image](examples/example_1_original.png)
+
+Vertical sorting with luminance as the mode:
+
+![Original image](examples/example_1_luminance.png)
+
+Horizontal sorting with white level as the mode:
+
+![Original image](examples/example_1_white.png)
+
+Complete vertical sorting by luminance (threshold of 0):
+
+![Original image](examples/example_1_complete_sort.png)
