@@ -53,6 +53,23 @@ property_seed (seed, "Random seed", rand)
 
 #include "gegl-op.h"
 
+static inline void
+swap_rgba_pixels(gfloat *array, gint a, gint b)
+{
+  gfloat temp_r = array[a];
+  gfloat temp_g = array[a + 1];
+  gfloat temp_b = array[a + 2];
+  gfloat temp_a = array[a + 3];
+  array[a] = array[b];
+  array[a + 1] = array[b + 1];
+  array[a + 2] = array[b + 2];
+  array[a + 3] = array[b + 3];
+  array[b] = temp_r;
+  array[b + 1] = temp_g;
+  array[b + 2] = temp_b;
+  array[b + 3] = temp_a;
+}
+
 static gdouble
 get_key (gfloat *pixel, GeglPixelsortMode mode)
 {
@@ -173,18 +190,9 @@ process (GeglOperation       *operation,
                     {
                       break;
                     }
-                  gfloat r = line_buf[k];
-                  gfloat g = line_buf[k + 1];
-                  gfloat b = line_buf[k + 2];
-                  gfloat a = line_buf[k + 3];
-                  line_buf[k] = line_buf[k - 4];
-                  line_buf[k + 1] = line_buf[k - 3];
-                  line_buf[k + 2] = line_buf[k - 2];
-                  line_buf[k + 3] = line_buf[k - 1];
-                  line_buf[k - 4] = r;
-                  line_buf[k - 3] = g;
-                  line_buf[k - 2] = b;
-                  line_buf[k - 1] = a;
+
+                  swap_rgba_pixels(line_buf, k, k - 4);
+
                   k -= 4;
                 }
             }
