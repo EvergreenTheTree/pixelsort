@@ -157,35 +157,36 @@ process (GeglOperation       *operation,
           else if (key < o->threshold && in_thresh)
             {
               end = j;
-              break;
+              in_thresh = FALSE;
             }
-        }
-      for (j = start; j <= end; j += 4)
-        {
-          gint k = j;
-          while (k > start)
+          if (in_thresh)
             {
-              gdouble key1 = get_key(&line_buf[k], mode);
-              gdouble key2 = get_key(&line_buf[k - 4], mode);
-
-              gboolean in_place = o->reverse ? (key2 > key1) : (key1 > key2);
-              if (in_place)
+              gint k = j;
+              while (k > start)
                 {
-                  break;
+                  gdouble key1 = get_key (&line_buf[k], mode);
+                  gdouble key2 = get_key (&line_buf[k - 4], mode);
+
+                  gboolean in_place
+                      = o->reverse ? (key2 > key1) : (key1 > key2);
+                  if (in_place)
+                    {
+                      break;
+                    }
+                  gfloat r = line_buf[k];
+                  gfloat g = line_buf[k + 1];
+                  gfloat b = line_buf[k + 2];
+                  gfloat a = line_buf[k + 3];
+                  line_buf[k] = line_buf[k - 4];
+                  line_buf[k + 1] = line_buf[k - 3];
+                  line_buf[k + 2] = line_buf[k - 2];
+                  line_buf[k + 3] = line_buf[k - 1];
+                  line_buf[k - 4] = r;
+                  line_buf[k - 3] = g;
+                  line_buf[k - 2] = b;
+                  line_buf[k - 1] = a;
+                  k -= 4;
                 }
-              gfloat r = line_buf[k];
-              gfloat g = line_buf[k + 1];
-              gfloat b = line_buf[k + 2];
-              gfloat a = line_buf[k + 3];
-              line_buf[k] = line_buf[k - 4];
-              line_buf[k + 1] = line_buf[k - 3];
-              line_buf[k + 2] = line_buf[k - 2];
-              line_buf[k + 3] = line_buf[k - 1];
-              line_buf[k - 4] = r;
-              line_buf[k - 3] = g;
-              line_buf[k - 2] = b;
-              line_buf[k - 1] = a;
-              k -= 4;
             }
         }
       gegl_buffer_set (output, &line_rect, 0, format, line_buf,
