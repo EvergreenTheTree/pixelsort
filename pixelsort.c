@@ -47,7 +47,7 @@ property_seed (seed, "Random seed", rand)
 
 #else
 
-#define GEGL_OP_AREA_FILTER
+#define GEGL_OP_FILTER
 #define GEGL_OP_NAME     pixelsort
 #define GEGL_OP_C_SOURCE pixelsort.c
 
@@ -81,6 +81,27 @@ prepare (GeglOperation *operation)
 
   gegl_operation_set_format (operation, "input", babl_format_with_space ("RGBA float", space));
   gegl_operation_set_format (operation, "output", babl_format_with_space ("RGBA float", space));
+}
+
+static GeglRectangle
+get_cached_region (GeglOperation       *self,
+                   const GeglRectangle *roi)
+{
+  const GeglRectangle *in_rect
+      = gegl_operation_source_get_bounding_box (self, "input");
+
+  if (in_rect && !gegl_rectangle_is_infinite_plane (in_rect))
+    return *in_rect;
+
+  return *roi;
+}
+
+static GeglRectangle
+get_required_for_output (GeglOperation       *self,
+                         const gchar         *input_pad,
+                         const GeglRectangle *roi)
+{
+  return get_cached_region (self, roi);
 }
 
 static gboolean
@@ -193,6 +214,51 @@ process (GeglOperation       *operation,
   return TRUE;
 }
 
+static gboolean
+operation_process (GeglOperation        *operation,
+                   GeglOperationContext *context,
+                   const gchar          *output_prop,
+                   const GeglRectangle  *result,
+                   gint                  level)
+{
+  gboolean         success = FALSE;
+
+  const GeglRectangle *in_rect
+      = gegl_operation_source_get_bounding_box (operation, "input");
+
+  if (in_rect && gegl_rectangle_is_infinite_plane (in_rect))
+    {
+      gpointer in = gegl_operation_context_get_object (context, "input");
+      gegl_operation_context_take_object (context, "output",
+                                          g_object_ref (G_OBJECT (in)));
+      return TRUE;
+    }
+  else
+    {
+      GeglOperationFilterClass *klass;
+      GeglBuffer *input;
+      GeglBuffer *output;
+
+      if (strcmp (output_prop, "output"))
+        {
+          g_warning ("requested processing of %s pad on a filter",
+                     output_prop);
+          return FALSE;
+        }
+
+      input
+          = (GeglBuffer *)gegl_operation_context_dup_object (context, "input");
+      output = gegl_operation_context_get_output_maybe_in_place (
+          operation, context, input, result);
+      klass = GEGL_OPERATION_FILTER_GET_CLASS (operation);
+      success = klass->process (operation, input, output, result, level);
+
+      g_clear_object (&input);
+    }
+
+  return success;
+}
+
 static void
 gegl_op_class_init (GeglOpClass *klass)
 {
@@ -202,8 +268,11 @@ gegl_op_class_init (GeglOpClass *klass)
   operation_class = GEGL_OPERATION_CLASS (klass);
   filter_class    = GEGL_OPERATION_FILTER_CLASS (klass);
 
-  filter_class->process    = process;
   operation_class->prepare = prepare;
+  operation_class->process = operation_process;
+  operation_class->get_required_for_output = get_required_for_output;
+  operation_class->get_cached_region = get_cached_region;
+  filter_class->process    = process;
 
   gegl_operation_class_set_keys (operation_class,
     "name",        "gegl:pixelsort",
