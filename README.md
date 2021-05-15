@@ -10,6 +10,8 @@ https://github.com/kimasendorf/ASDFPixelSort
 
 ## Compiling and Installing
 
+### Linux
+
 To compile and install you will need the GEGL header files (`libgegl-dev` on
 Debian based distributions or `gegl` on Arch Linux).
 
@@ -18,6 +20,11 @@ meson setup build
 meson compile -C build
 cp build/pixelsort.so ~/.local/share/gegl-0.4/plugins
 ```
+
+### Windows
+
+I have not figured out how to build and install this on Windows yet, hopefully there will
+be some instructions here in the near future.
 
 ## Example Images
 
