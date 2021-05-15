@@ -17,7 +17,6 @@
 
 #define GETTEXT_PACKAGE "pixelsort"
 #include <glib/gi18n-lib.h>
-#include <stdio.h>
 
 #ifdef GEGL_PROPERTIES
 
@@ -36,7 +35,7 @@ property_enum (direction, "Sort direction",
                GeglOrientation, gegl_orientation,
                GEGL_ORIENTATION_HORIZONTAL)
 
-property_boolean (reverse, "Reverse", FALSE)
+property_boolean (reverse_order, "Reverse sort order", FALSE)
      description ("Reverse sort order")
 
 property_double (threshold, "Threshold", 0.1)
@@ -53,25 +52,8 @@ property_seed (seed, "Random seed", rand)
 
 #include "gegl-op.h"
 
-static inline void
-swap_rgba_pixels(gfloat *array, gint a, gint b)
-{
-  gfloat temp_r = array[a];
-  gfloat temp_g = array[a + 1];
-  gfloat temp_b = array[a + 2];
-  gfloat temp_a = array[a + 3];
-  array[a] = array[b];
-  array[a + 1] = array[b + 1];
-  array[a + 2] = array[b + 2];
-  array[a + 3] = array[b + 3];
-  array[b] = temp_r;
-  array[b + 1] = temp_g;
-  array[b + 2] = temp_b;
-  array[b + 3] = temp_a;
-}
-
 static gdouble
-get_key (gfloat *pixel, GeglPixelsortMode mode)
+get_key (gfloat pixel[4], GeglPixelsortMode mode)
 {
   gfloat max;
   switch (mode)
@@ -88,6 +70,75 @@ get_key (gfloat *pixel, GeglPixelsortMode mode)
       return max;
     default:
       return 0.0;
+    }
+}
+
+static inline void
+swap_rgba_pixels(gfloat (*pixels)[4], gint a, gint b)
+{
+  gfloat temp_r = pixels[a][0];
+  gfloat temp_g = pixels[a][1];
+  gfloat temp_b = pixels[a][2];
+  gfloat temp_a = pixels[a][3];
+  pixels[a][0] = pixels[b][0];
+  pixels[a][1] = pixels[b][1];
+  pixels[a][2] = pixels[b][2];
+  pixels[a][3] = pixels[b][3];
+  pixels[b][0] = temp_r;
+  pixels[b][1] = temp_g;
+  pixels[b][2] = temp_b;
+  pixels[b][3] = temp_a;
+}
+
+static void
+merge (gfloat (*in)[4], gint left, gint right, gint end, gfloat (*out)[4],
+       gboolean reverse, GeglPixelsortMode mode)
+{
+  gint i = left;
+  gint j = right;
+  gboolean comp;
+  for (gint k = left; k < end; k++)
+    {
+      comp = reverse ^ (get_key (in[i], mode) <= get_key (in[j], mode));
+      if (i < right && (j >= end || comp))
+        {
+          out[k][0] = in[i][0];
+          out[k][1] = in[i][1];
+          out[k][2] = in[i][2];
+          out[k][3] = in[i][3];
+          i++;
+        }
+      else
+        {
+          out[k][0] = in[j][0];
+          out[k][1] = in[j][1];
+          out[k][2] = in[j][2];
+          out[k][3] = in[j][3];
+          j++;
+        }
+    }
+}
+
+static void
+stable_sort (gfloat (*pixels)[4], gfloat (*work)[4], gint start, gint end,
+             gboolean reverse, GeglPixelsortMode mode)
+{
+  gint n = (end - start) + 1;
+
+  for (gint width = 1; width < n; width *= 2)
+    {
+      for (gint i = start; i < end; i += width * 2)
+        {
+          merge (pixels, i, MIN (i + width, end), MIN (i + width * 2, end),
+                 work, reverse, mode);
+        }
+      for (gint i = start; i < end; i++)
+        {
+          pixels[i][0] = work[i][0];
+          pixels[i][1] = work[i][1];
+          pixels[i][2] = work[i][2];
+          pixels[i][3] = work[i][3];
+        }
     }
 }
 
@@ -131,73 +182,56 @@ process (GeglOperation       *operation,
   GeglProperties   *o = GEGL_PROPERTIES (operation);
   const Babl       *format = gegl_operation_get_format (operation, "output");
   GeglPixelsortMode mode = o->mode;
-  gint              size, length, i, j;
+  gint              num_lines, length, line_num, j;
   GeglRectangle     line_rect;
-  gfloat           *line_buf;
 
   if (o->direction == GEGL_ORIENTATION_HORIZONTAL)
     {
-      size = result->height;
+      num_lines = result->height;
       length = result->width;
       line_rect.width  = length;
       line_rect.height = 1;
     }
   else
     {
-      size = result->width;
+      num_lines = result->width;
       length = result->height;
       line_rect.width  = 1;
       line_rect.height = length;
     }
 
-  line_buf = g_new0 (gfloat, length * 4);
+  gfloat (*line_buf)[4] = (gfloat (*)[4]) g_new (gfloat, length * 4);
+  gfloat (*work_buf)[4] = (gfloat (*)[4]) g_new (gfloat, length * 4);
 
   line_rect.x = result->x;
   line_rect.y = result->y;
 
-  for (i = 0; i < size; i++)
+  gdouble threshold = o->threshold / 10;
+
+  for (line_num = 0; line_num < num_lines; line_num++)
     {
-      gegl_buffer_get (input, &line_rect, 1.0, format, line_buf,
+      gegl_buffer_get (input, &line_rect, 1.0, format, (gfloat *) line_buf,
                        GEGL_AUTO_ROWSTRIDE, GEGL_ABYSS_NONE);
 
       gint start = 0;
-      gint end = (length * 4) - 1;
       gboolean in_thresh = FALSE;
-      for (j = 0; j < length * 4; j += 4)
+      for (j = 0; j < length; j++)
         {
-          gdouble key = get_key (&line_buf[j], mode);
-          if (key >= o->threshold && !in_thresh)
+          gdouble key = get_key (line_buf[j], mode);
+          if (key >= threshold && !in_thresh)
             {
               start = j;
               in_thresh = TRUE;
             }
-          else if (key < o->threshold && in_thresh)
+          else if (((key < threshold) || j == length - 1)  && in_thresh)
             {
-              end = j;
+              stable_sort (line_buf, work_buf, start, j, o->reverse_order,
+                           o->mode);
               in_thresh = FALSE;
             }
-          if (in_thresh)
-            {
-              gint k = j;
-              while (k > start)
-                {
-                  gdouble key1 = get_key (&line_buf[k], mode);
-                  gdouble key2 = get_key (&line_buf[k - 4], mode);
-
-                  gboolean in_place
-                      = o->reverse ? (key2 > key1) : (key1 > key2);
-                  if (in_place)
-                    {
-                      break;
-                    }
-
-                  swap_rgba_pixels(line_buf, k, k - 4);
-
-                  k -= 4;
-                }
-            }
         }
-      gegl_buffer_set (output, &line_rect, 0, format, line_buf,
+      
+      gegl_buffer_set (output, &line_rect, 0, format, (gfloat *) line_buf,
                        GEGL_AUTO_ROWSTRIDE);
 
       if (o->direction == GEGL_ORIENTATION_HORIZONTAL)
@@ -211,6 +245,7 @@ process (GeglOperation       *operation,
     }
 
   g_free(line_buf);
+  g_free(work_buf);
 
   return TRUE;
 }

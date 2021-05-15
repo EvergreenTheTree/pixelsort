@@ -8,7 +8,6 @@ lib_args = ['-DBUILDING_PIXELSORT']
 
 gegl = dependency('gegl-0.4')
 shlib = shared_library('pixelsort', 'pixelsort.c',
-  install : true,
   c_args : lib_args,
   gnu_symbol_visibility : 'hidden',
   dependencies : gegl,
