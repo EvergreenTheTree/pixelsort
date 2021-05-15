@@ -6,10 +6,12 @@ project('pixelsort', 'c',
 # not the executables that use the library.
 lib_args = ['-DBUILDING_PIXELSORT']
 
-gegl = dependency('gegl-0.4')
+gegl = dependency('gegl-0.3', required : false)
+if not gegl.found()
+    gegl = dependency('gegl-0.4')
+endif
 shlib = shared_library('pixelsort', 'pixelsort.c',
   c_args : lib_args,
-  gnu_symbol_visibility : 'hidden',
   dependencies : gegl,
   name_prefix : '',
 )

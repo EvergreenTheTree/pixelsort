@@ -145,10 +145,15 @@ stable_sort (gfloat (*pixels)[4], gfloat (*work)[4], gint start, gint end,
 static void
 prepare (GeglOperation *operation)
 {
+#if GEGL_MAJOR_VERSION >= 4
   const Babl *space = gegl_operation_get_source_space (operation, "input");
 
   gegl_operation_set_format (operation, "input", babl_format_with_space ("RGBA float", space));
   gegl_operation_set_format (operation, "output", babl_format_with_space ("RGBA float", space));
+#else
+  gegl_operation_set_format (operation, "input",  babl_format ("RGBA float"));
+  gegl_operation_set_format (operation, "output", babl_format ("RGBA float"));
+#endif
 }
 
 static GeglRectangle
