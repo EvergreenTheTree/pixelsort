@@ -236,11 +236,9 @@ process (GeglOperation       *operation,
   GeglPixelsortKey  sort_key = o->sort_key;
   GeglPixelsortKey  threshold_key = o->threshold_key;
   gdouble           threshold = o->threshold;
+  gboolean          under_threshold = o->under_threshold;
   gint              num_lines, length, line_num, j;
   GeglRectangle     line_rect;
-
-  if (o->under_threshold)
-    threshold = 1 - threshold;
 
   if (o->direction == GEGL_ORIENTATION_HORIZONTAL)
     {
@@ -273,7 +271,7 @@ process (GeglOperation       *operation,
       for (j = 0; j < length; j++)
         {
           gdouble key = get_key (line_buf[j], threshold_key);
-          gboolean comp = key >= threshold;
+          gboolean comp = under_threshold ^ (key >= threshold);
           if (comp && !in_thresh)
             {
               start = j;
