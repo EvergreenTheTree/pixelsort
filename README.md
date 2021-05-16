@@ -19,10 +19,10 @@ most distributions).
 ```bash
 meson setup build
 ninja -C build
-cp build/pixelsort.so ~/.local/share/gegl-0.4/plugins
+cp build/pixelsort.so ~/.local/share/gegl-0.4/plug-ins
 ```
 
-If you have an older version of gegl you may need to copy to `~/.local/share/gegl-0.3/plugins`
+If you have an older version of gegl you may need to copy to `~/.local/share/gegl-0.3/plug-ins`
 instead (on Ubuntu 18.04 for example).
 
 ### Windows
