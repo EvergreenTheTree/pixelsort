@@ -20,16 +20,32 @@
 
 #ifdef GEGL_PROPERTIES
 
-enum_start (gegl_pixelsort_mode)
-  enum_value (GEGL_PIXELSORT_MODE_LUMINANCE, "luminance", "Luminance")
-  enum_value (GEGL_PIXELSORT_MODE_WHITE, "white", "White")
-  enum_value (GEGL_PIXELSORT_MODE_BLACK, "black", "Black")
-enum_end (GeglPixelsortMode)
+enum_start (gegl_pixelsort_key)
+  enum_value (GEGL_PIXELSORT_KEY_LUMINANCE, "luminance", "Luminance")
+  enum_value (GEGL_PIXELSORT_KEY_RGB_MAX, "rgb-maximum", "RGB Maximum")
+  enum_value (GEGL_PIXELSORT_KEY_HUE, "hue", "Hue")
+  enum_value (GEGL_PIXELSORT_KEY_SATURATION, "saturation", "Saturation")
+  enum_value (GEGL_PIXELSORT_KEY_RED, "red", "Red")
+  enum_value (GEGL_PIXELSORT_KEY_GREEN, "green", "Green")
+  enum_value (GEGL_PIXELSORT_KEY_BLUE, "blue", "Blue")
+enum_end (GeglPixelsortKey)
 
-property_enum (mode, "Mode",
-               GeglPixelsortMode, gegl_pixelsort_mode,
-               GEGL_PIXELSORT_MODE_LUMINANCE)
+property_enum (sort_key, "Sort Key",
+               GeglPixelsortKey, gegl_pixelsort_key,
+               GEGL_PIXELSORT_KEY_LUMINANCE)
   description ("Property used to sort the pixels")
+
+property_enum (threshold_key, "Threshold Key",
+               GeglPixelsortKey, gegl_pixelsort_key,
+               GEGL_PIXELSORT_KEY_LUMINANCE)
+  description ("Property used to determine what to sort in the current row/column")
+
+property_double (threshold, "Threshold", 0.1)
+    description ("Determines how much of each row/column is sorted")
+    value_range (0.0, 1.0)
+
+property_boolean (under_threshold, "Sort under threshold", FALSE)
+     description ("Sort pixels under threshold value instead of above it")
 
 property_enum (direction, "Sort direction",
                GeglOrientation, gegl_orientation,
@@ -37,10 +53,6 @@ property_enum (direction, "Sort direction",
 
 property_boolean (reverse_order, "Reverse sort order", FALSE)
      description ("Reverse sort order")
-
-property_double (threshold, "Threshold", 0.1)
-    description ("Determines how much of each row/column is sorted")
-    value_range (0.0, 1.0)
 
 property_seed (seed, "Random seed", rand)
 
@@ -53,21 +65,56 @@ property_seed (seed, "Random seed", rand)
 #include "gegl-op.h"
 
 static gdouble
-get_key (gfloat pixel[4], GeglPixelsortMode mode)
+get_key (gfloat pixel[4], GeglPixelsortKey key)
 {
   gfloat max;
-  switch (mode)
+  gfloat min;
+  switch (key)
     {
-    case GEGL_PIXELSORT_MODE_LUMINANCE:
+    case GEGL_PIXELSORT_KEY_LUMINANCE:
       return 0.2126 * pixel[0] + 0.7152 * pixel[1] + 0.0722 * pixel[2];
-    case GEGL_PIXELSORT_MODE_WHITE:
-    case GEGL_PIXELSORT_MODE_BLACK:
-      max = pixel[0];
-      if (pixel[1] > max)
-        max = pixel[1];
-      if (pixel[2] > max)
-        max = pixel[2];
-      return max;
+    case GEGL_PIXELSORT_KEY_RGB_MAX:
+      return MAX (MAX (pixel[0], pixel[1]), pixel[2]);
+    case GEGL_PIXELSORT_KEY_HUE:
+      min = MIN (MIN (pixel[0], pixel[1]), pixel[2]);
+      max = MAX (MAX (pixel[0], pixel[1]), pixel[2]);
+
+      if (min == max)
+        return 0;
+
+      gdouble hue = 0.0;
+      if (max == pixel[0])
+        {
+          hue = (pixel[1] - pixel[2]) / (max - min);
+        }
+      else if (max == pixel[1])
+        {
+          hue = 2 + (pixel[2] - pixel[0]) / (max - min);
+        }
+      else
+        {
+          hue = 4 + (pixel[0] - pixel[1]) / (max - min);
+        }
+
+      if (hue < 0)
+        hue += 6;
+      hue /= 6.0;
+      return hue;
+    case GEGL_PIXELSORT_KEY_SATURATION:
+      min = MIN (MIN (pixel[0], pixel[1]), pixel[2]);
+      max = MAX (MAX (pixel[0], pixel[1]), pixel[2]);
+      gdouble lightness = (min + max) / 2;
+
+      if (min == max)
+        return 0;
+
+      return (min - max) / (1 - ABS ((lightness * 2) - 1));
+    case GEGL_PIXELSORT_KEY_RED:
+      return pixel[0];
+    case GEGL_PIXELSORT_KEY_GREEN:
+      return pixel[1];
+    case GEGL_PIXELSORT_KEY_BLUE:
+      return pixel[2];
     default:
       return 0.0;
     }
@@ -92,14 +139,14 @@ swap_rgba_pixels(gfloat (*pixels)[4], gint a, gint b)
 
 static void
 merge (gfloat (*in)[4], gint left, gint right, gint end, gfloat (*out)[4],
-       gboolean reverse, GeglPixelsortMode mode)
+       gboolean reverse, GeglPixelsortKey key)
 {
   gint i = left;
   gint j = right;
   gboolean comp;
   for (gint k = left; k < end; k++)
     {
-      comp = reverse ^ (get_key (in[i], mode) <= get_key (in[j], mode));
+      comp = reverse ^ (get_key (in[i], key) <= get_key (in[j], key));
       if (i < right && (j >= end || comp))
         {
           out[k][0] = in[i][0];
@@ -121,7 +168,7 @@ merge (gfloat (*in)[4], gint left, gint right, gint end, gfloat (*out)[4],
 
 static void
 stable_sort (gfloat (*pixels)[4], gfloat (*work)[4], gint start, gint end,
-             gboolean reverse, GeglPixelsortMode mode)
+             gboolean reverse, GeglPixelsortKey key)
 {
   gint n = (end - start) + 1;
 
@@ -130,7 +177,7 @@ stable_sort (gfloat (*pixels)[4], gfloat (*work)[4], gint start, gint end,
       for (gint i = start; i < end; i += width * 2)
         {
           merge (pixels, i, MIN (i + width, end), MIN (i + width * 2, end),
-                 work, reverse, mode);
+                 work, reverse, key);
         }
       for (gint i = start; i < end; i++)
         {
@@ -186,9 +233,14 @@ process (GeglOperation       *operation,
   {
   GeglProperties   *o = GEGL_PROPERTIES (operation);
   const Babl       *format = gegl_operation_get_format (operation, "output");
-  GeglPixelsortMode mode = o->mode;
+  GeglPixelsortKey  sort_key = o->sort_key;
+  GeglPixelsortKey  threshold_key = o->threshold_key;
+  gdouble           threshold = o->threshold;
   gint              num_lines, length, line_num, j;
   GeglRectangle     line_rect;
+
+  if (o->under_threshold)
+    threshold = 1 - threshold;
 
   if (o->direction == GEGL_ORIENTATION_HORIZONTAL)
     {
@@ -211,8 +263,6 @@ process (GeglOperation       *operation,
   line_rect.x = result->x;
   line_rect.y = result->y;
 
-  gdouble threshold = o->threshold / 10;
-
   for (line_num = 0; line_num < num_lines; line_num++)
     {
       gegl_buffer_get (input, &line_rect, 1.0, format, (gfloat *) line_buf,
@@ -222,16 +272,17 @@ process (GeglOperation       *operation,
       gboolean in_thresh = FALSE;
       for (j = 0; j < length; j++)
         {
-          gdouble key = get_key (line_buf[j], mode);
-          if (key >= threshold && !in_thresh)
+          gdouble key = get_key (line_buf[j], threshold_key);
+          gboolean comp = key >= threshold;
+          if (comp && !in_thresh)
             {
               start = j;
               in_thresh = TRUE;
             }
-          else if (((key < threshold) || j == length - 1)  && in_thresh)
+          else if ((!comp || j == length - 1)  && in_thresh)
             {
-              stable_sort (line_buf, work_buf, start, j, o->reverse_order,
-                           o->mode);
+              stable_sort (line_buf, work_buf, start, j + 1, o->reverse_order,
+                           sort_key);
               in_thresh = FALSE;
             }
         }
