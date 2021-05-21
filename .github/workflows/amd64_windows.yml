@@ -1,0 +1,33 @@
+name: amd64_windows
+
+on:
+  workflow_dispatch:
+  
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: msys2/setup-msys2@v2
+        with:
+          # Variant of the environment to set by default: MSYS, MINGW32, MINGW64, UCRT64 or CLANG64
+          msystem: MINGW64
+          # Default value for MSYS2_PATH_TYPE environment variable: strict, inherit or minimal
+          path-type: minimal
+          # Retrieve and extract base installation from upstream GitHub Releases
+          release: true
+          # Update MSYS2 installation through pacman
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-meson
+            mingw-w64-x86_64-gegl
+
+      - run: meson setup build
+      - run: meson compile -C build
+      - uses: actions/upload-artifact@v2
+        with:
+          name: windows-operation-dll-64bit
+          path: build/pixelsort.dll
